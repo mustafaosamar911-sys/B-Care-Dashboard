@@ -59,12 +59,6 @@ export default function App() {
     events.forEach(event => {
       document.addEventListener(event, unlockAudio, { once: true });
     });
-    
-    return () => {
-      events.forEach(event => {
-        document.removeEventListener(event, unlockAudio);
-      });
-    };
 
     (async () => {
       const token = localStorage.getItem("token");
@@ -279,7 +273,7 @@ export default function App() {
             hasPayment: false,
           };
 
-          playCodeSound(); // Use code sound instead
+          playCodeSound(); // Use code sound
 
           return {
             ...m,
@@ -422,6 +416,13 @@ export default function App() {
       socket.on("userDeleted", removeUser);
       socket.on("flagUpdated", updateFlag);
     })();
+    
+    // Cleanup: remove event listeners
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, unlockAudio);
+      });
+    };
   }, [navigate]);
 
   // 👇 Open the card without clearing the paid flag.
