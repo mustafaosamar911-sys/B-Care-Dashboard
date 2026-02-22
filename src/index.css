@@ -11,11 +11,3 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
-
-
-/* Keeps table scrolling stable (prevents random jumps) */
-.tableScroll{
-  max-height: 80vh;
-  overflow-y: auto;
-  overflow-anchor: none;
-}
