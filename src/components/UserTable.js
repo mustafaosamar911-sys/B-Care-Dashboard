@@ -34,16 +34,19 @@ export default function UserTable({
   };
 
   const entries = Object.entries(users);
-const isOnline = (u) => u.currentPage && u.currentPage !== "offline";
+  const isOnline = (u) => u.currentPage && u.currentPage !== "offline";
 
-// Sort by latest activity (most recent updates on top), regardless of online/offline.
-const sortedEntries = [...entries].sort((a, b) => {
-  const aMs = a[1]?.lastActivityAt || 0;
-  const bMs = b[1]?.lastActivityAt || 0;
-  if (bMs !== aMs) return bMs - aMs;
-  return String(a[0]).localeCompare(String(b[0]));
-});
-
+  // Sort by latest activity (last message / last submitted data) FIRST.
+  // Online/Offline is still shown in the Status column, but it no longer controls ordering.
+  const sortedEntries = entries.sort((a, b) => {
+    const [ipA, uA] = a;
+    const [ipB, uB] = b;
+    const tA = Number(uA.lastActivityAt || 0);
+    const tB = Number(uB.lastActivityAt || 0);
+    if (tA !== tB) return tB - tA; // newest first
+    // stable fallback (prevents row swapping)
+    return ipA.localeCompare(ipB);
+  });
 
   return (
     <table className="table table-striped table-bordered">
