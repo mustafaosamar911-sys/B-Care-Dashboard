@@ -99,6 +99,7 @@ export default function App() {
                 hasNewData: false,
                 hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
               };
             }
             map[ipKey] = {
@@ -109,6 +110,7 @@ export default function App() {
               hasNewData: false,
               hasPayment: map[ipKey].hasPayment,
               lastActivityAt: Math.max(map[ipKey].lastActivityAt || 0, ts),
+              lastSeenAt: Math.max(map[ipKey].lastSeenAt || 0, ts),
             };
           });
         });
@@ -124,11 +126,13 @@ export default function App() {
                 hasNewData: false,
                 hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
               };
             }
             map[ipKey].payments.push(payDoc);
             map[ipKey].hasPayment = true; // show as completed payment
             map[ipKey].lastActivityAt = Math.max(map[ipKey].lastActivityAt || 0, new Date(payDoc.createdAt || payDoc.updatedAt || Date.now()).getTime());
+            map[ipKey].lastSeenAt = Math.max(map[ipKey].lastSeenAt || 0, new Date(payDoc.createdAt || payDoc.updatedAt || Date.now()).getTime());
           });
         }
 
@@ -142,6 +146,7 @@ export default function App() {
                 hasNewData: false,
                 hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
               };
             }
             map[ipKey].flag = flag;
@@ -156,6 +161,7 @@ export default function App() {
             if (map[ipKey]) {
               map[ipKey].currentPage = currentPage;
             }
+              map[ipKey].lastSeenAt = Date.now();
           });
         }
 
@@ -179,6 +185,7 @@ export default function App() {
                   hasNewData: false,
                   hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
                 };
               }
               map[ipKey] = {
@@ -206,6 +213,7 @@ export default function App() {
                 hasNewData: false,
                 hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
               };
             }
             map[ipKey] = {
@@ -250,6 +258,7 @@ export default function App() {
             hasNewData: false,
             hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
           };
 
           playNewDataSound();
@@ -264,6 +273,7 @@ export default function App() {
               hasNewData: true, // ✅ mark as new data
               hasPayment: oldObj.hasPayment || u.hasPayment === true,
               lastActivityAt: Date.now(),
+              lastSeenAt: Date.now(),
             },
           };
         });
@@ -278,6 +288,7 @@ export default function App() {
             hasNewData: false,
             hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
           };
 
           playCodeSound(); // Use code sound
@@ -292,6 +303,7 @@ export default function App() {
               hasNewData: true, // ✅ mark as new data
               hasPayment: oldObj.hasPayment || u.hasPayment === true,
               lastActivityAt: Date.now(),
+              lastSeenAt: Date.now(),
             },
           };
         });
@@ -306,6 +318,7 @@ export default function App() {
             hasNewData: false,
             hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
           };
           return {
             ...m,
@@ -330,6 +343,7 @@ export default function App() {
             hasNewData: false,
             hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
           };
 
           // 🚫 skip duplicates
@@ -356,6 +370,8 @@ export default function App() {
               flag: oldObj.flag,
               hasNewData: true, // new data arrived
               hasPayment: true, // ✅ mark as paid/completed
+              lastActivityAt: Date.now(),
+              lastSeenAt: Date.now(),
             },
           };
         });
@@ -378,6 +394,7 @@ export default function App() {
               hasNewData: false,
               hasPayment: false,
                 lastActivityAt: 0,
+            lastSeenAt: 0,
             }),
             flag,
           },
@@ -416,6 +433,7 @@ export default function App() {
               [ip]: {
                 ...m[ip],
                 currentPage: page,
+                lastSeenAt: Date.now(),
               },
             };
           });
@@ -427,6 +445,7 @@ export default function App() {
               [ip]: {
                 ...m[ip],
                 currentPage: "offline",
+                lastSeenAt: Date.now(),
                 // keep hasNewData/hasPayment unchanged
               },
             };
@@ -438,8 +457,32 @@ export default function App() {
       socket.on("flagUpdated", updateFlag);
     })();
     
-    // Cleanup: remove event listeners
+    
+    // 🕒 Offline watchdog:
+    // If we stop receiving location updates for a user, mark them offline automatically.
+    // This keeps the Online/Offline indicator accurate even when the browser closes without sending a final "offline".
+    const OFFLINE_AFTER_MS = 20000; // 20s
+    const watchdog = setInterval(() => {
+      const now = Date.now();
+      setUsers((m) => {
+        let changed = false;
+        const next = { ...m };
+        Object.entries(next).forEach(([ip, u]) => {
+          const lastSeen = Number(u?.lastSeenAt) || 0;
+          if (lastSeen > 0 && now - lastSeen > OFFLINE_AFTER_MS) {
+            if (u.currentPage !== "offline") {
+              next[ip] = { ...u, currentPage: "offline" };
+              changed = true;
+            }
+          }
+        });
+        return changed ? next : m;
+      });
+    }, 5000);
+
+// Cleanup: remove event listeners
     return () => {
+      clearInterval(watchdog);
       events.forEach(event => {
         document.removeEventListener(event, unlockAudio);
       });
