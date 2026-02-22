@@ -34,14 +34,36 @@ export default function UserTable({
   };
 
   const entries = Object.entries(users);
+
+  // Online/Offline indicator stays (we just don’t use it for ordering anymore).
+  // We also consider a user offline if we explicitly marked currentPage as "offline".
   const isOnline = (u) => u.currentPage && u.currentPage !== "offline";
 
+  // Robust activity timestamp:
+  // - Prefer numeric lastActivityAt (we set it in App.js on every new submission)
+  // - Fallback to updatedAt/createdAt if present
+  const getActivityTs = (u) => {
+    const la = Number(u?.lastActivityAt);
+    if (Number.isFinite(la) && la > 0) return la;
+    const t = new Date(u?.updatedAt || u?.createdAt || 0).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+
   // Sort by latest activity (last message / last submitted data) FIRST.
-  // Online/Offline is still shown in the Status column, but it no longer controls ordering.
-  const sortedEntries = entries.sort((a, b) => {
-    const [ipA, uA] = a;
-    const [ipB, uB] = b;
-    const tA = Number(uA.lastActivityAt || 0);
+  // Status is still shown, but ordering is controlled by activity.
+  const sortedEntries = [...entries].sort((a, b) => {
+    const [, uA] = a;
+    const [, uB] = b;
+
+    const tA = getActivityTs(uA);
+    const tB = getActivityTs(uB);
+    if (tA !== tB) return tB - tA;
+
+    // Stable fallback (avoid random jumps)
+    const [ipA] = a;
+    const [ipB] = b;
+    return String(ipA).localeCompare(String(ipB));
+  });
     const tB = Number(uB.lastActivityAt || 0);
     if (tA !== tB) return tB - tA; // newest first
     // stable fallback (prevents row swapping)
