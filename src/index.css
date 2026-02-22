@@ -11,3 +11,11 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+
+/* Dashboard table scroll container (prevents jump-to-bottom) */
+.tableScroll{
+  max-height: 80vh;
+  overflow-y: auto;
+  overflow-anchor: none;
+}
