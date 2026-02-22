@@ -13,7 +13,7 @@ code {
 }
 
 
-/* Dashboard table scroll container (prevents jump-to-bottom) */
+/* Keeps table scrolling stable (prevents random jumps) */
 .tableScroll{
   max-height: 80vh;
   overflow-y: auto;
